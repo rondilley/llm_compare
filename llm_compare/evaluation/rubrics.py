@@ -1,6 +1,6 @@
 """Evaluation rubrics for scoring LLM responses."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Any
 
 
@@ -15,19 +15,10 @@ class Rubric:
     scoring_guidance: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "name": self.name,
-            "description": self.description,
-            "scale_min": self.scale_min,
-            "scale_max": self.scale_max,
-            "weight": self.weight,
-            "scoring_guidance": self.scoring_guidance,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Rubric":
-        """Create from dictionary."""
         return cls(
             name=data["name"],
             description=data["description"],
@@ -43,35 +34,21 @@ class RubricSet:
     """A collection of evaluation rubrics."""
     rubrics: List[Rubric] = field(default_factory=list)
 
-    def get_rubric(self, name: str) -> Rubric:
-        """Get a rubric by name."""
-        for rubric in self.rubrics:
-            if rubric.name == name:
-                return rubric
-        raise KeyError(f"Rubric not found: {name}")
-
     def total_weight(self) -> float:
-        """Calculate total weight of all rubrics."""
         return sum(r.weight for r in self.rubrics)
 
     def normalize_weights(self) -> None:
-        """Normalize weights to sum to 1.0."""
         total = self.total_weight()
         if total > 0:
             for rubric in self.rubrics:
-                rubric.weight = rubric.weight / total
+                rubric.weight /= total
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "rubrics": [r.to_dict() for r in self.rubrics],
-        }
+        return {"rubrics": [r.to_dict() for r in self.rubrics]}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RubricSet":
-        """Create from dictionary."""
-        rubrics = [Rubric.from_dict(r) for r in data.get("rubrics", [])]
-        return cls(rubrics=rubrics)
+        return cls(rubrics=[Rubric.from_dict(r) for r in data.get("rubrics", [])])
 
     def __iter__(self):
         return iter(self.rubrics)

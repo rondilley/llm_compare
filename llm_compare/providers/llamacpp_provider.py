@@ -110,9 +110,9 @@ class LlamaCppProvider(LLMProvider):
             self.status = ProviderStatus.HEALTHY
             logger.info(f"llama.cpp model loaded: {self._model_name}")
 
-        except Exception as e:
+        except Exception:
             self.status = ProviderStatus.UNHEALTHY
-            logger.error(f"Failed to load llama.cpp model: {e}")
+            logger.error("Failed to load llama.cpp model")
             raise
 
     def generate(self, prompt: str, **kwargs) -> Response:
@@ -184,9 +184,9 @@ class LlamaCppProvider(LLMProvider):
                 raw_response=response,
             )
 
-        except Exception as e:
+        except Exception:
             self.status = ProviderStatus.UNHEALTHY
-            logger.error(f"llama.cpp generation error: {e}")
+            logger.error("llama.cpp generation error occurred")
             raise
 
     def _supports_chat(self) -> bool:

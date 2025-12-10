@@ -140,6 +140,18 @@ See `config.py` for customizable settings:
 - Rubric definitions
 - Report formatting options
 
+## Security
+
+The tool includes several security measures:
+- Session ID validation (prevents path traversal attacks)
+- llama.cpp model path validation (blocks paths outside allowed directories)
+- Restricted file permissions on session data (600 on Unix)
+- JSON schema validation for configuration files
+- Prompt size limits (100KB max)
+- Sanitized error messages (no API key/path leakage)
+
+**Note:** API keys are stored in plaintext `*.key.txt` files. For production use, consider using environment variables or a secrets manager.
+
 ## Requirements
 
 - Python 3.10+

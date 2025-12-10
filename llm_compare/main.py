@@ -11,10 +11,40 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import print as rprint
 
-from .config import Config, default_config
+from .config import Config, default_config, MAX_PROMPT_SIZE
 from .session.manager import SessionManager
 from .report.generator import ReportGenerator
 from .utils.logging import setup_logging, get_logger
+
+
+class PromptValidationError(Exception):
+    """Raised when prompt validation fails."""
+    pass
+
+
+def validate_prompt(prompt: str) -> str:
+    """
+    Validate and sanitize user prompt.
+
+    Args:
+        prompt: User-provided prompt string
+
+    Returns:
+        Validated prompt string
+
+    Raises:
+        PromptValidationError: If prompt exceeds size limits
+    """
+    if not prompt:
+        raise PromptValidationError("Prompt cannot be empty")
+
+    if len(prompt) > MAX_PROMPT_SIZE:
+        raise PromptValidationError(
+            f"Prompt too large ({len(prompt):,} characters). "
+            f"Maximum allowed: {MAX_PROMPT_SIZE:,} characters."
+        )
+
+    return prompt
 
 # Create console - use ASCII-safe mode on Windows to avoid encoding issues
 if sys.platform == 'win32':
@@ -117,6 +147,13 @@ def cli(ctx, prompt, providers, output, skip, verbose):
 @click.pass_context
 def evaluate(ctx, prompt):
     """Evaluate a prompt across all available LLMs."""
+    # Validate prompt size
+    try:
+        prompt = validate_prompt(prompt)
+    except PromptValidationError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
     print_banner()
 
     config = Config(output_dir=ctx.obj.get('output', default_config.output_dir))
@@ -226,6 +263,13 @@ def interactive(ctx):
             if prompt.lower() in ('quit', 'exit', 'q'):
                 console.print("Goodbye!")
                 break
+
+            # Validate prompt
+            try:
+                prompt = validate_prompt(prompt)
+            except PromptValidationError as e:
+                console.print(f"[red]Error: {e}[/red]")
+                continue
 
             # Create and run session
             session = manager.create_session(prompt)

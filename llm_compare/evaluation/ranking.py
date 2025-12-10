@@ -1,6 +1,6 @@
 """Ranking engine - Bradley-Terry model and score aggregation."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Any, Optional, Tuple
 import math
 
@@ -20,14 +20,9 @@ class RankedResponse:
     score_breakdown: Dict[str, float]
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "rank": self.rank,
-            "provider": self.provider,
-            "score": self.score,
-            "confidence_interval": list(self.confidence_interval),
-            "score_breakdown": self.score_breakdown,
-        }
+        d = asdict(self)
+        d["confidence_interval"] = list(self.confidence_interval)
+        return d
 
 
 @dataclass
@@ -38,20 +33,9 @@ class FinalRankings:
     confidence_level: float = 0.95
 
     def get_winner(self) -> Optional[str]:
-        """Get the top-ranked provider."""
-        if self.rankings:
-            return self.rankings[0].provider
-        return None
-
-    def get_rank(self, provider: str) -> Optional[int]:
-        """Get rank for a specific provider."""
-        for ranked in self.rankings:
-            if ranked.provider == provider:
-                return ranked.rank
-        return None
+        return self.rankings[0].provider if self.rankings else None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
         return {
             "rankings": [r.to_dict() for r in self.rankings],
             "methodology": self.methodology,

@@ -98,8 +98,8 @@ class ProviderDiscovery:
                     self._providers[provider_name] = provider
                     logger.info(f"Discovered provider: {provider_name} ({provider.model_id})")
 
-            except Exception as e:
-                logger.error(f"Failed to initialize {provider_name}: {e}")
+            except Exception:
+                logger.error(f"Failed to initialize provider: {provider_name}")
 
     def _discover_llamacpp_models(self) -> None:
         """Discover local llama.cpp GGUF models."""
@@ -113,8 +113,8 @@ class ProviderDiscovery:
                 if provider:
                     self._providers[provider.name] = provider
                     logger.info(f"Discovered llama.cpp model: {provider.name}")
-            except Exception as e:
-                logger.error(f"Failed to load llama.cpp model {model_name}: {e}")
+            except Exception:
+                logger.error(f"Failed to load llama.cpp model: {model_name}")
 
         # Then, auto-discover from model directories
         for model_dir in self.config.llamacpp.model_dirs:
@@ -146,8 +146,8 @@ class ProviderDiscovery:
                     if provider:
                         self._providers[provider.name] = provider
                         logger.info(f"Auto-discovered llama.cpp model: {provider.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to auto-load llama.cpp model {gguf_file}: {e}")
+                except Exception:
+                    logger.warning(f"Failed to auto-load llama.cpp model: {model_name}")
 
     def _create_llamacpp_provider(
         self,
@@ -181,8 +181,8 @@ class ProviderDiscovery:
         except ImportError:
             logger.debug("llama-cpp-python not installed, skipping local model support")
             return None
-        except Exception as e:
-            logger.error(f"Failed to create llama.cpp provider: {e}")
+        except Exception:
+            logger.error("Failed to create llama.cpp provider")
             return None
 
     def _read_key_file(self, key_path: Path) -> Optional[str]:
@@ -200,8 +200,8 @@ class ProviderDiscovery:
                 # Read first line, strip whitespace
                 key = f.readline().strip()
                 return key if key else None
-        except Exception as e:
-            logger.error(f"Failed to read key file {key_path}: {e}")
+        except Exception:
+            logger.error("Failed to read API key file")
             return None
 
     def _create_provider(
@@ -250,12 +250,12 @@ class ProviderDiscovery:
                             max_tokens=self.config.provider_config.max_tokens,
                             temperature=self.config.provider_config.temperature,
                         )
-                except Exception as e:
-                    logger.warning(f"{provider_name}: Model discovery failed, using default: {e}")
+                except Exception:
+                    logger.warning(f"{provider_name}: Model discovery failed, using default")
 
             return provider
-        except Exception as e:
-            logger.error(f"Failed to create provider {provider_name}: {e}")
+        except Exception:
+            logger.error(f"Failed to create provider: {provider_name}")
             return None
 
     def get_provider(self, name: str) -> Optional[LLMProvider]:

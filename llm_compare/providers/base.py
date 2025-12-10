@@ -1,10 +1,10 @@
 """Base provider interface for LLM providers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from ..utils.logging import get_logger
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 class ProviderStatus(Enum):
-    """Status of an LLM provider."""
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -30,24 +29,22 @@ class Response:
     output_tokens: int = 0
     finish_reason: str = "stop"
     timestamp: datetime = field(default_factory=datetime.utcnow)
-    raw_response: Optional[Any] = None
+    raw_response: Optional[Any] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "provider": self.provider,
-            "model_id": self.model_id,
-            "text": self.text,
-            "latency_ms": self.latency_ms,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "finish_reason": self.finish_reason,
-            "timestamp": self.timestamp.isoformat(),
-        }
+        d = asdict(self)
+        del d["raw_response"]  # Not serializable
+        d["timestamp"] = self.timestamp.isoformat()
+        return d
 
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
+
+    # Subclasses should override with their preferred models (best first)
+    MODEL_PREFERENCES: List[str] = []
+    # Fallback pattern to match if no preference found (e.g., "gpt-4", "claude-")
+    MODEL_FALLBACK_PATTERN: Optional[str] = None
 
     def __init__(
         self,
@@ -57,16 +54,6 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ):
-        """
-        Initialize the provider.
-
-        Args:
-            api_key: API key for authentication
-            model_id: Model identifier (uses default if not specified)
-            timeout: Request timeout in seconds
-            max_tokens: Maximum tokens in response
-            temperature: Temperature for generation
-        """
         self.api_key = api_key
         self._model_id = model_id
         self.timeout = timeout
@@ -74,106 +61,69 @@ class LLMProvider(ABC):
         self.temperature = temperature
         self.status = ProviderStatus.HEALTHY
         self._client = None
-
-        # Initialize the client
         self._create_client()
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Provider name identifier."""
         pass
 
     @property
     @abstractmethod
     def default_model(self) -> str:
-        """Default model ID for this provider."""
         pass
 
     @property
     def model_id(self) -> str:
-        """Current model ID."""
         return self._model_id or self.default_model
 
     def discover_models(self) -> List[str]:
-        """
-        Discover available models from the provider's API.
-
-        Returns:
-            List of available model IDs
-        """
+        """Override in subclasses to query API for available models."""
         return []
 
     def select_best_model(self) -> str:
-        """
-        Select the best available model from the provider.
-
-        This method queries the API for available models and selects
-        the best one based on provider-specific preferences.
-
-        Returns:
-            The model ID of the best available model
-        """
+        """Select the best available model based on MODEL_PREFERENCES."""
         available = self.discover_models()
         if not available:
-            logger.warning(f"{self.name}: No models discovered, using default: {self.default_model}")
             return self.default_model
 
         best = self._rank_models(available)
         if best:
-            logger.info(f"{self.name}: Selected best model: {best}")
+            logger.info(f"{self.name}: Selected model: {best}")
             return best
-
         return self.default_model
 
     def _rank_models(self, models: List[str]) -> Optional[str]:
-        """
-        Rank models and return the best one.
+        """Rank models by MODEL_PREFERENCES, with fallback pattern matching."""
+        models_set = set(models)
 
-        Override this in subclasses to implement provider-specific ranking.
+        # Try each preferred model (exact match, then prefix match)
+        for preferred in self.MODEL_PREFERENCES:
+            if preferred in models_set:
+                return preferred
+            for model in models:
+                if model.startswith(preferred):
+                    return model
 
-        Args:
-            models: List of available model IDs
+        # Fallback: find any model matching the fallback pattern
+        if self.MODEL_FALLBACK_PATTERN:
+            for model in sorted(models, reverse=True):
+                if self.MODEL_FALLBACK_PATTERN in model:
+                    return model
 
-        Returns:
-            The best model ID, or None to use default
-        """
         return None
 
     @abstractmethod
     def _create_client(self) -> None:
-        """Create the API client. Must be implemented by subclasses."""
         pass
 
     @abstractmethod
     def generate(self, prompt: str, **kwargs) -> Response:
-        """
-        Generate a response to a prompt.
-
-        Args:
-            prompt: The prompt to send to the model
-            **kwargs: Additional provider-specific arguments
-
-        Returns:
-            Response object with the generated text and metadata
-        """
+        """Generate a response. Override in subclasses."""
         pass
 
     def evaluate(self, prompt: str, response_text: str, rubric: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Evaluate a response against a rubric.
-
-        This is a convenience method that constructs an evaluation prompt
-        and calls generate().
-
-        Args:
-            prompt: Original prompt that generated the response
-            response_text: The response text to evaluate
-            rubric: Evaluation rubric with name, description, and scale
-
-        Returns:
-            Dictionary with score and reasoning
-        """
+        """Evaluate a response against a rubric using G-Eval methodology."""
         eval_prompt = self._build_evaluation_prompt(prompt, response_text, rubric)
         result = self.generate(eval_prompt)
         return self._parse_evaluation_response(result.text, rubric)

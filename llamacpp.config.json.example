@@ -1,0 +1,29 @@
+{
+  "model_dirs": [
+    "./models",
+    "~/models",
+    "C:/Users/YourName/models"
+  ],
+  "default_n_ctx": 4096,
+  "default_n_gpu_layers": 0,
+  "models": {
+    "llama3-8b": {
+      "path": "./models/llama-3-8b-instruct.Q4_K_M.gguf",
+      "n_ctx": 8192,
+      "n_gpu_layers": 35,
+      "chat_format": "llama-3"
+    },
+    "mistral-7b": {
+      "path": "./models/mistral-7b-instruct-v0.2.Q4_K_M.gguf",
+      "n_ctx": 4096,
+      "n_gpu_layers": 0,
+      "chat_format": "mistral-instruct"
+    },
+    "phi3-mini": {
+      "path": "./models/Phi-3-mini-4k-instruct-q4.gguf",
+      "n_ctx": 4096,
+      "n_gpu_layers": 32,
+      "chat_format": "chatml"
+    }
+  }
+}
