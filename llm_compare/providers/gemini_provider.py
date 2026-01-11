@@ -59,7 +59,7 @@ class GeminiProvider(LLMProvider):
         max_retries=3,
         retryable_exceptions=(google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable, google_exceptions.DeadlineExceeded),
     ))
-    def generate(self, prompt: str, **kwargs) -> Response:
+    def _generate_impl(self, prompt: str, **kwargs) -> Response:
         start_time = time.time()
         system_message = kwargs.get("system_message", "You are a helpful AI assistant.")
         full_prompt = f"{system_message}\n\n{prompt}"

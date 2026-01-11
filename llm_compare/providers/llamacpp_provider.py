@@ -115,7 +115,7 @@ class LlamaCppProvider(LLMProvider):
             logger.error("Failed to load llama.cpp model")
             raise
 
-    def generate(self, prompt: str, **kwargs) -> Response:
+    def _generate_impl(self, prompt: str, **kwargs) -> Response:
         """
         Generate a response using the local llama.cpp model.
 

@@ -15,7 +15,8 @@ flowchart TB
         CLI --> SM[Session Manager]
         DISC --> PM[Provider Manager]
         PM --> SM
-        SM --> EVAL[Evaluation Engine]
+        SM --> PROMPT[Prompt Transformer<br/>Repetition]
+        PROMPT --> EVAL[Evaluation Engine]
         EVAL --> RANK[Ranking Engine]
     end
 
@@ -175,6 +176,86 @@ classDiagram
     LLMProvider <|-- ClaudeProvider
     LLMProvider <|-- GeminiProvider
     LLMProvider <|-- XAIProvider
+```
+
+---
+
+## Prompt Transformation System
+
+Based on the paper "Prompt Repetition Improves Non-Reasoning LLMs" (Leviathan et al., 2025), the system supports prompt repetition strategies that improve LLM performance.
+
+### Repetition Flow
+
+```mermaid
+flowchart LR
+    subgraph Input
+        ORIG[Original Prompt]
+    end
+
+    subgraph Transform["Prompt Transformer"]
+        MODE{Repetition<br/>Mode?}
+        MODE -->|none| PASS[Pass Through]
+        MODE -->|simple| SIMPLE["<QUERY><QUERY>"]
+        MODE -->|verbose| VERB["<QUERY> Let me repeat: <QUERY>"]
+        MODE -->|triple| TRIPLE["<QUERY> x3 with transitions"]
+        MODE -->|auto| AUTO[Auto-Detect Mode]
+        AUTO --> DETECT{Analyze Prompt}
+        DETECT -->|options-first| SIMPLE
+        DETECT -->|list/sequence| TRIPLE
+        DETECT -->|reasoning| PASS
+    end
+
+    subgraph Output
+        FINAL[Transformed Prompt]
+    end
+
+    ORIG --> MODE
+    PASS --> FINAL
+    SIMPLE --> FINAL
+    VERB --> FINAL
+    TRIPLE --> FINAL
+```
+
+### Provider Integration
+
+```mermaid
+sequenceDiagram
+    participant SM as Session Manager
+    participant BASE as LLMProvider.generate()
+    participant REP as apply_repetition()
+    participant IMPL as _generate_impl()
+    participant API as LLM API
+
+    SM->>BASE: generate(prompt, repetition_mode)
+    BASE->>REP: apply_repetition(prompt, mode)
+    REP-->>BASE: transformed_prompt
+    BASE->>IMPL: _generate_impl(transformed_prompt)
+    IMPL->>API: API request
+    API-->>IMPL: response
+    IMPL-->>BASE: Response object
+    BASE->>BASE: response.repetition_mode = mode
+    BASE-->>SM: Response with mode tracked
+```
+
+### Comparison Mode
+
+When `--compare-repetition` is enabled, both baseline and repeated responses are collected:
+
+```mermaid
+flowchart TD
+    PROMPT[User Prompt] --> BASELINE[Baseline Collection<br/>mode=none]
+    PROMPT --> REPEATED[Repeated Collection<br/>mode=simple/verbose/triple]
+
+    BASELINE --> ANALYZE[Analyze Effects]
+    REPEATED --> ANALYZE
+
+    ANALYZE --> METRICS[Per-Provider Metrics]
+    METRICS --> LAT[Latency Delta]
+    METRICS --> LEN[Output Length Delta]
+    METRICS --> PREF[Preferred Mode]
+
+    METRICS --> SESSION[Session Data]
+    METRICS --> REPORT[PDF Report Section]
 ```
 
 ---
@@ -547,6 +628,10 @@ flowchart BT
         RETRY[retry.py]
     end
 
+    subgraph Prompting["prompting/"]
+        REP[repetition.py]
+    end
+
     subgraph Providers["providers/"]
         BASE[base.py]
         OAI[openai_provider.py]
@@ -576,7 +661,9 @@ flowchart BT
     end
 
     MAIN[main.py] --> MGR
+    MAIN --> REP
     MGR --> DISC
+    MGR --> REP
     MGR --> POINT & PAIR & ADV & COLL
     MGR --> RANK_E
     MGR --> GEN
@@ -585,12 +672,14 @@ flowchart BT
     DISC --> BASE
     OAI & CLD & GEM & XAI_P --> BASE
     BASE --> LOG & RETRY
+    BASE --> REP
 
     POINT & PAIR & ADV & COLL --> RUB
     POINT & PAIR & ADV & COLL --> BASE
 
     GEN --> TMPL
     GEN --> STOR
+    GEN --> REP
 ```
 
 ---

@@ -11,9 +11,10 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import print as rprint
 
-from .config import Config, default_config, MAX_PROMPT_SIZE
+from .config import Config, default_config, MAX_PROMPT_SIZE, RepetitionMode
 from .session.manager import SessionManager
 from .report.generator import ReportGenerator
+from .prompting.repetition import detect_recommended_mode, get_repetition_info
 from .utils.logging import setup_logging, get_logger
 
 
@@ -113,14 +114,69 @@ def print_rankings(rankings):
     console.print(table)
 
 
+def print_repetition_analysis(analysis):
+    """Print repetition analysis results."""
+    if not analysis:
+        return
+
+    console.print()
+    console.print("[bold]Prompt Repetition Analysis[/bold]")
+    console.print(f"  Mode Used: {analysis.mode_used.value}")
+    if analysis.recommended_mode:
+        console.print(f"  Recommended: {analysis.recommended_mode.value}")
+        console.print(f"  Reason: {analysis.recommendation_reason}")
+
+    if analysis.compare_enabled and analysis.provider_comparisons:
+        console.print()
+        table = Table(title="Repetition Comparison")
+        table.add_column("Provider", style="cyan")
+        table.add_column("Baseline Latency")
+        table.add_column("Repeated Latency")
+        table.add_column("Latency Delta")
+        table.add_column("Baseline Length")
+        table.add_column("Repeated Length")
+        table.add_column("Preferred")
+
+        for provider, data in analysis.provider_comparisons.items():
+            latency_delta = data['latency_delta_ms']
+            delta_color = "green" if latency_delta <= 0 else "yellow"
+            delta_str = f"[{delta_color}]{latency_delta:+d}ms ({data['latency_delta_pct']:+.1f}%)[/{delta_color}]"
+
+            preferred_color = "green" if data['preferred_mode'] == "repeated" else "dim"
+            preferred_str = f"[{preferred_color}]{data['preferred_mode']}[/{preferred_color}]"
+
+            table.add_row(
+                provider.upper(),
+                f"{data['baseline_latency_ms']}ms",
+                f"{data['repeated_latency_ms']}ms",
+                delta_str,
+                str(data['baseline_length']),
+                str(data['repeated_length']),
+                preferred_str,
+            )
+
+        console.print(table)
+
+
 @click.group(invoke_without_command=True)
 @click.option('--prompt', '-p', type=str, help='Prompt to evaluate')
 @click.option('--providers', '-P', type=str, help='Comma-separated list of providers to use')
 @click.option('--output', '-o', type=click.Path(), help='Output directory for results')
 @click.option('--skip', '-s', type=str, help='Phases to skip (comma-separated)')
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
+@click.option(
+    '--repetition', '-r',
+    type=click.Choice(['none', 'simple', 'verbose', 'triple', 'auto'], case_sensitive=False),
+    default='none',
+    help='Prompt repetition mode (improves non-reasoning LLMs)'
+)
+@click.option(
+    '--compare-repetition', '-c',
+    is_flag=True,
+    help='Run both baseline and repeated prompts for comparison'
+)
 @click.pass_context
-def cli(ctx, prompt, providers, output, skip, verbose):
+def cli(ctx, prompt, providers, output, skip, verbose, repetition, compare_repetition):
     """LLM Compare - Multi-AI comparison and evaluation tool."""
     ctx.ensure_object(dict)
 
@@ -128,11 +184,22 @@ def cli(ctx, prompt, providers, output, skip, verbose):
     log_level = 'DEBUG' if verbose else 'INFO'
     setup_logging(level=getattr(__import__('logging'), log_level))
 
+    # Parse repetition mode
+    if repetition == 'auto':
+        rep_mode = None  # Will be auto-detected
+        auto_detect = True
+    else:
+        rep_mode = RepetitionMode(repetition)
+        auto_detect = False
+
     # Store options in context
     ctx.obj['verbose'] = verbose
     ctx.obj['output'] = Path(output) if output else default_config.output_dir
     ctx.obj['skip'] = skip.split(',') if skip else []
     ctx.obj['providers_filter'] = providers.split(',') if providers else None
+    ctx.obj['repetition_mode'] = rep_mode
+    ctx.obj['compare_repetition'] = compare_repetition
+    ctx.obj['auto_detect_repetition'] = auto_detect
 
     # If no subcommand, run evaluation
     if ctx.invoked_subcommand is None:
@@ -156,8 +223,36 @@ def evaluate(ctx, prompt):
 
     print_banner()
 
-    config = Config(output_dir=ctx.obj.get('output', default_config.output_dir))
+    # Get repetition settings from context
+    rep_mode = ctx.obj.get('repetition_mode')
+    compare_rep = ctx.obj.get('compare_repetition', False)
+    auto_detect = ctx.obj.get('auto_detect_repetition', False)
+
+    # Build config with repetition settings
+    from .config import RepetitionConfig
+    rep_config = RepetitionConfig(
+        mode=rep_mode if rep_mode else RepetitionMode.NONE,
+        compare_modes=compare_rep,
+        auto_detect=auto_detect,
+    )
+
+    config = Config(
+        output_dir=ctx.obj.get('output', default_config.output_dir),
+        repetition=rep_config,
+    )
     manager = SessionManager(config=config)
+
+    # Show repetition info if enabled
+    if rep_mode and rep_mode != RepetitionMode.NONE:
+        info = get_repetition_info(rep_mode)
+        console.print(f"[bold cyan]Repetition Mode:[/bold cyan] {info['name']}")
+        console.print(f"  {info['description']}")
+        console.print()
+    elif auto_detect:
+        detected, reason = detect_recommended_mode(prompt)
+        console.print(f"[bold cyan]Auto-detected Mode:[/bold cyan] {detected.value}")
+        console.print(f"  {reason}")
+        console.print()
 
     # Discover providers
     with get_progress() as progress:
@@ -192,11 +287,20 @@ def evaluate(ctx, prompt):
 
     skip_phases = ctx.obj.get('skip', [])
 
+    # Collect responses with repetition handling
+    task_description = "Running evaluation pipeline..."
+    if compare_rep:
+        task_description = "Running evaluation with repetition comparison..."
+
     with get_progress() as progress:
-        # Phase 0: Collect responses
-        task = progress.add_task("Collecting responses from providers...", total=None)
+        task = progress.add_task(task_description, total=None)
         try:
-            session = manager.run_session(session, skip_phases=skip_phases)
+            session = manager.run_session(
+                session,
+                skip_phases=skip_phases,
+                repetition_mode=rep_mode,
+                compare_repetition=compare_rep,
+            )
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
@@ -205,6 +309,11 @@ def evaluate(ctx, prompt):
     console.print()
     console.print("[green]Evaluation complete![/green]")
     console.print()
+
+    # Print repetition analysis if available
+    if session.repetition_analysis:
+        print_repetition_analysis(session.repetition_analysis)
+        console.print()
 
     # Print rankings
     if session.final_rankings:

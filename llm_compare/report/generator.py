@@ -17,6 +17,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 
 from ..utils.logging import get_logger
 from ..session.manager import Session
+from ..prompting.repetition import get_repetition_info
 
 logger = get_logger(__name__)
 
@@ -223,6 +224,11 @@ class ReportGenerator:
         story.extend(self._build_prompt_section(session))
         story.append(Spacer(1, 0.3*inch))
 
+        # Section 1.5: Repetition Analysis (if enabled)
+        if session.repetition_analysis:
+            story.extend(self._build_repetition_section(session))
+            story.append(Spacer(1, 0.3*inch))
+
         # Section 2: Responses
         story.extend(self._build_responses_section(session))
         story.append(PageBreak())
@@ -340,6 +346,91 @@ class ReportGenerator:
             borderPadding=12,
         )
         elements.append(Paragraph(prompt_text, prompt_style))
+
+        return elements
+
+    def _build_repetition_section(self, session: Session) -> List:
+        """Build prompt repetition analysis section."""
+        elements = []
+
+        analysis = session.repetition_analysis
+        if not analysis:
+            return elements
+
+        elements.append(Paragraph("1.5. Prompt Repetition", self.styles['SectionHeader']))
+
+        # Mode used
+        mode_info = get_repetition_info(analysis.mode_used)
+        elements.append(Paragraph(
+            f"<b>Mode Used:</b> {mode_info['name']}",
+            self.styles['Normal']
+        ))
+        elements.append(Paragraph(
+            f"{mode_info['description']}",
+            self.styles['SmallText']
+        ))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Recommendation
+        if analysis.recommended_mode:
+            rec_info = get_repetition_info(analysis.recommended_mode)
+            elements.append(Paragraph(
+                f"<b>Recommended Mode:</b> {rec_info['name']}",
+                self.styles['Normal']
+            ))
+            elements.append(Paragraph(
+                f"Reason: {analysis.recommendation_reason}",
+                self.styles['SmallText']
+            ))
+            elements.append(Spacer(1, 0.1*inch))
+
+        # Comparison table if available
+        if analysis.compare_enabled and analysis.provider_comparisons:
+            elements.append(Paragraph(
+                "Baseline vs. Repeated Prompt Comparison:",
+                self.styles['SubHeader']
+            ))
+            elements.append(Spacer(1, 0.1*inch))
+
+            # Build comparison table
+            data = [['Provider', 'Baseline\nLatency', 'Repeated\nLatency', 'Delta', 'Baseline\nLength', 'Repeated\nLength', 'Preferred']]
+
+            for provider, comp in analysis.provider_comparisons.items():
+                delta_pct = comp.get('latency_delta_pct', 0)
+                delta_str = f"{comp.get('latency_delta_ms', 0):+d}ms\n({delta_pct:+.1f}%)"
+
+                data.append([
+                    provider.upper(),
+                    f"{comp.get('baseline_latency_ms', 0)}ms",
+                    f"{comp.get('repeated_latency_ms', 0)}ms",
+                    delta_str,
+                    str(comp.get('baseline_length', 0)),
+                    str(comp.get('repeated_length', 0)),
+                    comp.get('preferred_mode', 'N/A').capitalize(),
+                ])
+
+            table = Table(data, colWidths=[1*inch, 0.9*inch, 0.9*inch, 0.85*inch, 0.85*inch, 0.85*inch, 0.85*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#dee2e6')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+                ('PADDING', (0, 0), (-1, -1), 4),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            elements.append(table)
+
+            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Paragraph(
+                "<i>Note: Based on the paper \"Prompt Repetition Improves Non-Reasoning LLMs\" "
+                "(Leviathan et al., 2025), repeating prompts allows each token to attend to every "
+                "other token, improving performance without increasing output length.</i>",
+                self.styles['SmallText']
+            ))
 
         return elements
 

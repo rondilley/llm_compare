@@ -4,10 +4,19 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+class RepetitionMode(Enum):
+    """Prompt repetition strategies (re-exported from prompting module)."""
+    NONE = "none"
+    SIMPLE = "simple"
+    VERBOSE = "verbose"
+    TRIPLE = "triple"
 
 
 class ConfigurationError(Exception):
@@ -190,6 +199,25 @@ class EvaluationWeights:
 
 
 @dataclass
+class RepetitionConfig:
+    """
+    Configuration for prompt repetition.
+
+    Based on "Prompt Repetition Improves Non-Reasoning LLMs" (Leviathan et al., 2025).
+    Repeating prompts allows each token to attend to all other tokens,
+    improving performance without increasing output length or latency.
+    """
+    # Repetition mode to use
+    mode: RepetitionMode = RepetitionMode.NONE
+
+    # Compare repeated vs non-repeated responses
+    compare_modes: bool = False
+
+    # Auto-detect best mode based on prompt structure
+    auto_detect: bool = False
+
+
+@dataclass
 class Config:
     """Main configuration for LLM Compare."""
     # Paths
@@ -222,6 +250,9 @@ class Config:
 
     # llama.cpp configuration
     llamacpp: LlamaCppConfig = field(default_factory=LlamaCppConfig)
+
+    # Prompt repetition configuration
+    repetition: RepetitionConfig = field(default_factory=RepetitionConfig)
 
     def get_key_file_path(self, provider: str) -> Optional[Path]:
         """Get the full path to a provider's key file."""

@@ -45,7 +45,7 @@ class XAIProvider(LLMProvider):
             return []
 
     @retry_with_backoff(RetryConfig(max_retries=3, retryable_exceptions=(RateLimitError, APITimeoutError, APIError)))
-    def generate(self, prompt: str, **kwargs) -> Response:
+    def _generate_impl(self, prompt: str, **kwargs) -> Response:
         start_time = time.time()
         system_message = kwargs.get("system_message", "You are a helpful AI assistant.")
 

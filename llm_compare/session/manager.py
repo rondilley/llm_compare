@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional, List
 
-from ..config import Config, default_config
+from ..config import Config, default_config, RepetitionMode
 from ..providers.base import LLMProvider, Response
 from ..providers.discovery import ProviderDiscovery
 from ..evaluation.rubrics import RubricSet, default_rubrics
@@ -16,6 +16,11 @@ from ..evaluation.pairwise import PairwiseEvaluator, PairwiseResults
 from ..evaluation.adversarial import AdversarialDebate, AdversarialResults
 from ..evaluation.collaborative import CollaborativeConsensus, ConsensusResults
 from ..evaluation.ranking import RankingEngine, FinalRankings
+from ..prompting.repetition import (
+    apply_repetition,
+    detect_recommended_mode,
+    get_repetition_info,
+)
 from ..utils.logging import get_logger, create_session_logger
 from .storage import SessionStorage
 
@@ -44,6 +49,23 @@ class SessionMetadata:
 
 
 @dataclass
+class RepetitionAnalysis:
+    """Analysis of prompt repetition effects on responses."""
+    mode_used: RepetitionMode = RepetitionMode.NONE
+    compare_enabled: bool = False
+    recommended_mode: Optional[RepetitionMode] = None
+    recommendation_reason: str = ""
+    # Per-provider comparison (if compare_enabled)
+    provider_comparisons: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["mode_used"] = self.mode_used.value
+        d["recommended_mode"] = self.recommended_mode.value if self.recommended_mode else None
+        return d
+
+
+@dataclass
 class Session:
     """An evaluation session."""
     session_id: str
@@ -52,12 +74,15 @@ class Session:
     status: SessionStatus = SessionStatus.CREATED
     config: Optional[Config] = None
     responses: Dict[str, Response] = field(default_factory=dict)
+    # Responses without repetition (for comparison mode)
+    baseline_responses: Dict[str, Response] = field(default_factory=dict)
     pointwise_results: Optional[PointwiseResults] = None
     pairwise_results: Optional[PairwiseResults] = None
     adversarial_results: Optional[AdversarialResults] = None
     consensus_results: Optional[ConsensusResults] = None
     final_rankings: Optional[FinalRankings] = None
     metadata: SessionMetadata = field(default_factory=SessionMetadata)
+    repetition_analysis: Optional[RepetitionAnalysis] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
 
@@ -72,6 +97,9 @@ class Session:
             "responses": {
                 name: resp.to_dict() for name, resp in self.responses.items()
             },
+            "baseline_responses": {
+                name: resp.to_dict() for name, resp in self.baseline_responses.items()
+            } if self.baseline_responses else {},
             "evaluations": {
                 "pointwise": self.pointwise_results.to_dict() if self.pointwise_results else None,
                 "pairwise": self.pairwise_results.to_dict() if self.pairwise_results else None,
@@ -80,6 +108,7 @@ class Session:
             },
             "rankings": self.final_rankings.to_dict() if self.final_rankings else None,
             "metadata": self.metadata.to_dict(),
+            "repetition_analysis": self.repetition_analysis.to_dict() if self.repetition_analysis else None,
             "error": self.error,
         }
 
@@ -102,11 +131,35 @@ class SessionManager:
         session_id = str(uuid.uuid4())[:8]
         return Session(session_id=session_id, prompt=prompt, created_at=datetime.utcnow(), config=self.config)
 
-    def run_session(self, session: Session, skip_phases: Optional[List[str]] = None) -> Session:
-        """Run a complete evaluation session through all phases."""
+    def run_session(
+        self,
+        session: Session,
+        skip_phases: Optional[List[str]] = None,
+        repetition_mode: Optional[RepetitionMode] = None,
+        compare_repetition: bool = False,
+    ) -> Session:
+        """
+        Run a complete evaluation session through all phases.
+
+        Args:
+            session: The session to run
+            skip_phases: List of phase names to skip
+            repetition_mode: Repetition mode to use (overrides config)
+            compare_repetition: If True, run both baseline and repeated prompts
+        """
         skip_phases = skip_phases or []
         slog = create_session_logger(self.storage.get_session_dir(session.session_id), session.session_id)
         start_time = datetime.utcnow()
+
+        # Determine repetition settings
+        rep_mode = repetition_mode or self.config.repetition.mode
+        do_compare = compare_repetition or self.config.repetition.compare_modes
+
+        # Auto-detect if enabled
+        if self.config.repetition.auto_detect and rep_mode == RepetitionMode.NONE:
+            detected_mode, reason = detect_recommended_mode(session.prompt)
+            slog.info(f"Auto-detected repetition mode: {detected_mode.value} ({reason})")
+            rep_mode = detected_mode
 
         try:
             if not self.providers:
@@ -114,16 +167,51 @@ class SessionManager:
             if len(self.providers) < 2:
                 raise ValueError(f"Need at least 2 providers, found {len(self.providers)}")
 
+            # Initialize repetition analysis
+            recommended, rec_reason = detect_recommended_mode(session.prompt)
+            session.repetition_analysis = RepetitionAnalysis(
+                mode_used=rep_mode,
+                compare_enabled=do_compare,
+                recommended_mode=recommended,
+                recommendation_reason=rec_reason,
+            )
+
             # Phase 0: Collect responses
             slog.info("=== Starting Phase: Response Collection ===")
+            if rep_mode != RepetitionMode.NONE:
+                slog.info(f"Using repetition mode: {rep_mode.value}")
             session.status = SessionStatus.COLLECTING
             session.responses = {}
+
+            # Collect baseline responses (no repetition) if comparing
+            if do_compare:
+                slog.info("Collecting baseline responses (no repetition)...")
+                session.baseline_responses = {}
+                for name, provider in self.providers.items():
+                    try:
+                        response = provider.generate(
+                            session.prompt,
+                            repetition_mode=RepetitionMode.NONE
+                        )
+                        session.baseline_responses[name] = response
+                    except Exception:
+                        logger.error(f"Provider {name} failed (baseline)")
+
+            # Collect main responses (with repetition if enabled)
+            slog.info(f"Collecting responses with repetition mode: {rep_mode.value}")
             for name, provider in self.providers.items():
                 try:
-                    response = provider.generate(session.prompt)
+                    response = provider.generate(session.prompt, repetition_mode=rep_mode)
                     session.responses[name] = response
                 except Exception:
                     logger.error(f"Provider {name} failed")
+
+            # Analyze repetition effects if comparing
+            if do_compare and session.baseline_responses:
+                session.repetition_analysis.provider_comparisons = (
+                    self._analyze_repetition_effects(session)
+                )
+
             self.storage.save_responses(session.session_id, {k: v.to_dict() for k, v in session.responses.items()})
 
             session.status = SessionStatus.EVALUATING
@@ -186,6 +274,49 @@ class SessionManager:
         consensus = session.consensus_results.weighted_scores if session.consensus_results else {}
 
         return engine.compute_rankings(pointwise, pairwise_rates, adversarial, consensus, pairwise_matrix)
+
+    def _analyze_repetition_effects(self, session: Session) -> Dict[str, Dict[str, Any]]:
+        """
+        Analyze the effects of prompt repetition by comparing baseline vs repeated responses.
+
+        Returns per-provider analysis including:
+        - latency_delta_ms: Change in latency
+        - output_length_delta: Change in output length
+        - preferred_mode: Which mode produced a longer/richer response
+        """
+        comparisons = {}
+
+        for provider_name in session.responses.keys():
+            if provider_name not in session.baseline_responses:
+                continue
+
+            baseline = session.baseline_responses[provider_name]
+            repeated = session.responses[provider_name]
+
+            latency_delta = repeated.latency_ms - baseline.latency_ms
+            baseline_len = len(baseline.text)
+            repeated_len = len(repeated.text)
+            length_delta = repeated_len - baseline_len
+
+            # Determine preferred mode based on response richness
+            # (longer responses often indicate more thorough answers)
+            preferred = "repeated" if repeated_len >= baseline_len else "baseline"
+
+            comparisons[provider_name] = {
+                "baseline_latency_ms": baseline.latency_ms,
+                "repeated_latency_ms": repeated.latency_ms,
+                "latency_delta_ms": latency_delta,
+                "latency_delta_pct": (latency_delta / baseline.latency_ms * 100) if baseline.latency_ms > 0 else 0,
+                "baseline_output_tokens": baseline.output_tokens,
+                "repeated_output_tokens": repeated.output_tokens,
+                "baseline_length": baseline_len,
+                "repeated_length": repeated_len,
+                "length_delta": length_delta,
+                "length_delta_pct": (length_delta / baseline_len * 100) if baseline_len > 0 else 0,
+                "preferred_mode": preferred,
+            }
+
+        return comparisons
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.storage.load_session(session_id)

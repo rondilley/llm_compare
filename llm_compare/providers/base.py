@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from ..utils.logging import get_logger
+from ..prompting.repetition import RepetitionMode, apply_repetition
 
 logger = get_logger(__name__)
 
@@ -30,11 +31,13 @@ class Response:
     finish_reason: str = "stop"
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_response: Optional[Any] = field(default=None, repr=False)
+    repetition_mode: RepetitionMode = RepetitionMode.NONE
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         del d["raw_response"]  # Not serializable
         d["timestamp"] = self.timestamp.isoformat()
+        d["repetition_mode"] = self.repetition_mode.value
         return d
 
 
@@ -118,9 +121,37 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def generate(self, prompt: str, **kwargs) -> Response:
+    def _generate_impl(self, prompt: str, **kwargs) -> Response:
         """Generate a response. Override in subclasses."""
         pass
+
+    def generate(
+        self,
+        prompt: str,
+        repetition_mode: RepetitionMode = RepetitionMode.NONE,
+        **kwargs
+    ) -> Response:
+        """
+        Generate a response with optional prompt repetition.
+
+        Args:
+            prompt: Original prompt text
+            repetition_mode: Repetition strategy to apply
+            **kwargs: Additional arguments passed to provider
+
+        Returns:
+            Response object with repetition_mode field set
+        """
+        # Apply repetition transformation
+        effective_prompt = apply_repetition(prompt, repetition_mode)
+
+        # Call the provider-specific implementation
+        response = self._generate_impl(effective_prompt, **kwargs)
+
+        # Record which repetition mode was used
+        response.repetition_mode = repetition_mode
+
+        return response
 
     def evaluate(self, prompt: str, response_text: str, rubric: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate a response against a rubric using G-Eval methodology."""

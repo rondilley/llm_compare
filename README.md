@@ -12,6 +12,7 @@ LLM Compare sends the same prompt to all available AI providers, then orchestrat
 - **Dynamic Model Selection:** Automatically queries each provider's API to select the best available model
 - **Multi-Provider Support:** OpenAI, Anthropic Claude, Google Gemini, xAI Grok
 - **Local Model Support:** Run local GGUF models via llama.cpp alongside cloud APIs
+- **Prompt Repetition:** Improves non-reasoning LLM performance based on research paper (Leviathan et al., 2025)
 - **Hybrid Evaluation Pipeline:**
   - Pointwise scoring against defined rubrics
   - Pairwise head-to-head comparisons
@@ -97,6 +98,33 @@ python -m llm_compare --providers openai,claude --prompt "Your prompt"
 # Custom output directory
 python -m llm_compare --output ./my_evaluations --prompt "Your prompt"
 ```
+
+### Prompt Repetition
+
+Based on the paper "Prompt Repetition Improves Non-Reasoning LLMs" (Leviathan et al., 2025), repeating the prompt allows each token to attend to every other token, improving performance without increasing output length or latency.
+
+```bash
+# Use simple repetition (2x prompt)
+python -m llm_compare -p "Your prompt" --repetition simple
+
+# Auto-detect best repetition mode based on prompt structure
+python -m llm_compare -p "Your prompt" --repetition auto
+
+# Compare baseline vs repeated responses (A/B testing)
+python -m llm_compare -p "Your prompt" --repetition simple --compare-repetition
+
+# Triple repetition (best for list/sequence tasks)
+python -m llm_compare -p "What is the 25th name in this list?" --repetition triple
+```
+
+**Repetition Modes:**
+| Mode | Description | Best For |
+|------|-------------|----------|
+| `none` | No repetition (baseline) | Reasoning/CoT prompts |
+| `simple` | `<QUERY><QUERY>` | General improvement |
+| `verbose` | `<QUERY> Let me repeat: <QUERY>` | Medium-length prompts |
+| `triple` | 3x with transitions | List/sequence tasks |
+| `auto` | Auto-detect based on prompt | Let system decide |
 
 ## Evaluation Pipeline
 
