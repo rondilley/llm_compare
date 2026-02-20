@@ -40,7 +40,7 @@ LLAMACPP_CONFIG_SCHEMA = {
         },
         "default_n_gpu_layers": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": -1,
             "maximum": 1000,
         },
         "models": {
@@ -56,7 +56,7 @@ LLAMACPP_CONFIG_SCHEMA = {
                     },
                     "n_gpu_layers": {
                         "type": "integer",
-                        "minimum": 0,
+                        "minimum": -1,
                         "maximum": 1000,
                     },
                     "chat_format": {"type": "string", "maxLength": 100},

@@ -500,6 +500,118 @@ def show(ctx, session_id):
         console.print(table)
 
 
+@cli.command('setup-local')
+@click.option('--models-dir', type=click.Path(), default='./models',
+              help='Directory to download models into')
+@click.option('--force', is_flag=True, help='Re-download even if model exists')
+@click.option('--cpu-only', is_flag=True, help='Skip GPU detection, select CPU-appropriate model')
+@click.option('--dry-run', is_flag=True, help='Show recommendation without downloading')
+def setup_local(models_dir, force, cpu_only, dry_run):
+    """Auto-detect hardware and download best local GGUF model."""
+    from pathlib import Path as _Path
+    from .hardware import (
+        detect_hardware, select_model, ModelDownloader,
+        generate_llamacpp_config, write_config,
+        InsufficientResourcesError, DownloadError,
+    )
+
+    print_banner()
+    models_path = _Path(models_dir).resolve()
+
+    # Step 1: Detect hardware
+    console.print("[bold]Detecting hardware...[/bold]")
+    profile = detect_hardware(cpu_only=cpu_only)
+
+    hw_table = Table(title="Hardware Profile")
+    hw_table.add_column("Component", style="cyan")
+    hw_table.add_column("Details", style="white")
+    hw_table.add_row("Platform", profile.platform)
+    hw_table.add_row("CPU", f"{profile.cpu_count} cores ({profile.cpu_arch})")
+    hw_table.add_row("RAM", f"{profile.total_ram_mb:,}MB total, {profile.available_ram_mb:,}MB available")
+    if profile.has_gpu:
+        for gpu in profile.gpus:
+            hw_table.add_row(
+                f"GPU #{gpu.index}",
+                f"{gpu.name} - {gpu.vram_total_mb:,}MB total, {gpu.vram_free_mb:,}MB free",
+            )
+    else:
+        hw_table.add_row("GPU", "None detected (CPU-only mode)")
+    console.print(hw_table)
+    console.print()
+
+    # Step 2: Select model
+    try:
+        rec = select_model(profile)
+    except InsufficientResourcesError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[yellow]Minimum: 4GB available RAM or 3GB GPU VRAM.[/yellow]")
+        sys.exit(1)
+
+    rec_table = Table(title="Model Recommendation")
+    rec_table.add_column("Setting", style="cyan")
+    rec_table.add_column("Value", style="green")
+    rec_table.add_row("Model", rec.model_family)
+    rec_table.add_row("Quantization", rec.quantization)
+    rec_table.add_row("File", rec.filename)
+    rec_table.add_row("Download Size", f"~{rec.estimated_size_mb:,}MB")
+    rec_table.add_row("GPU Layers", str(rec.n_gpu_layers) + (" (all)" if rec.n_gpu_layers == -1 else ""))
+    rec_table.add_row("Context Size", str(rec.n_ctx))
+    rec_table.add_row("Reason", rec.reason)
+    console.print(rec_table)
+    console.print()
+
+    if dry_run:
+        console.print("[yellow]Dry run - no download performed.[/yellow]")
+        return
+
+    # Step 3: Download
+    downloader = ModelDownloader(models_path)
+
+    existing = downloader.check_existing(rec.filename)
+    if existing and not force:
+        console.print(f"[green]Model already exists:[/green] {existing}")
+        model_path = existing
+    else:
+        if not downloader.check_disk_space(rec.estimated_size_mb):
+            free = downloader.get_free_space_mb()
+            console.print(
+                f"[red]Insufficient disk space. Need ~{rec.estimated_size_mb:,}MB, "
+                f"have {free:,}MB free.[/red]"
+            )
+            sys.exit(1)
+
+        console.print(f"[bold]Downloading to {models_path}...[/bold]")
+        try:
+            model_path = downloader.download(rec)
+            console.print(f"[green]Download complete:[/green] {model_path}")
+        except DownloadError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+
+    console.print()
+
+    # Step 4: Generate config
+    config_path = _Path("llamacpp.config.json")
+    if config_path.exists() and not force:
+        console.print(f"[yellow]Config already exists:[/yellow] {config_path}")
+        console.print("Use --force to overwrite.")
+    else:
+        config_dict = generate_llamacpp_config(rec, model_path, models_path)
+        write_config(config_dict, config_path)
+        console.print(f"[green]Config written:[/green] {config_path}")
+
+    console.print()
+    console.print(Panel(
+        "[bold green]Setup complete![/bold green]\n\n"
+        "Next steps:\n"
+        "  1. Install llama-cpp-python: pip install llama-cpp-python\n"
+        "  2. Run: python -m llm_compare providers\n"
+        "     (local model should appear in the list)\n"
+        "  3. Run an evaluation: python -m llm_compare -p \"Your prompt\"",
+        title="Local Model Ready",
+    ))
+
+
 def main():
     """Main entry point."""
     cli(obj={})

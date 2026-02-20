@@ -8,10 +8,19 @@ from google.generativeai.types import GenerationConfig
 from google.api_core import exceptions as google_exceptions
 
 from .base import LLMProvider, Response, ProviderStatus
+from ..prompting.repetition import RepetitionMode
 from ..utils.logging import get_logger
 from ..utils.retry import retry_with_backoff, RetryConfig
 
 logger = get_logger(__name__)
+
+
+class PermanentQuotaError(Exception):
+    """Model not available on the current billing plan (quota limit: 0)."""
+    def __init__(self, model_id: str, original_error: Exception):
+        self.model_id = model_id
+        self.original_error = original_error
+        super().__init__(f"Model {model_id} not available on current plan (quota limit: 0)")
 
 
 class GeminiProvider(LLMProvider):
@@ -23,13 +32,17 @@ class GeminiProvider(LLMProvider):
     ]
     MODEL_FALLBACK_PATTERN = "gemini-"
 
+    def __init__(self, *args, **kwargs):
+        self._failed_models: set = set()
+        super().__init__(*args, **kwargs)
+
     @property
     def name(self) -> str:
         return "gemini"
 
     @property
     def default_model(self) -> str:
-        return "gemini-2.0-flash"
+        return "gemini-2.5-flash"
 
     def _create_client(self) -> None:
         try:
@@ -41,19 +54,73 @@ class GeminiProvider(LLMProvider):
             logger.error("Failed to create Gemini client")
             raise
 
+    def _try_fallback_model(self) -> bool:
+        """Fall back to the next model in preference order. Returns True if switched."""
+        self._failed_models.add(self.model_id)
+        for model in self.MODEL_PREFERENCES:
+            if model not in self._failed_models:
+                logger.warning(
+                    f"gemini: {self.model_id} not available on current plan, "
+                    f"falling back to {model}"
+                )
+                self._model_id = model
+                self._client = genai.GenerativeModel(model)
+                return True
+        return False
+
+    def generate(self, prompt, repetition_mode=RepetitionMode.NONE, **kwargs):
+        while True:
+            try:
+                return super().generate(prompt, repetition_mode, **kwargs)
+            except PermanentQuotaError:
+                if not self._try_fallback_model():
+                    raise
+
     def discover_models(self) -> List[str]:
         try:
             chat_models = []
             for m in genai.list_models():
                 supported = getattr(m, 'supported_generation_methods', [])
-                if isinstance(supported, list):
-                    methods = [getattr(x, 'name', x) if hasattr(x, 'name') else str(x) for x in supported]
-                    if "generateContent" in methods and "gemini" in m.name.lower():
-                        chat_models.append(m.name.replace("models/", ""))
-            return chat_models
-        except Exception:
-            logger.warning("Gemini model discovery failed")
+                methods = [str(x) for x in supported] if supported else []
+                if "generateContent" in methods and "gemini" in m.name.lower():
+                    model_id = m.name.replace("models/", "")
+                    chat_models.append(model_id)
+            # Prefer canonical names: for each MODEL_PREFERENCES prefix, if both
+            # an exact match and versioned variants exist, keep the exact match.
+            # If only versioned variants exist, keep the shortest (most canonical).
+            return self._deduplicate_models(chat_models)
+        except Exception as e:
+            logger.warning(f"Gemini model discovery failed: {e}")
             return []
+
+    def _deduplicate_models(self, models: List[str]) -> List[str]:
+        """Prefer canonical model names over versioned/preview variants."""
+        models_set = set(models)
+        result = set()
+        matched = set()
+
+        for preferred in self.MODEL_PREFERENCES:
+            if preferred in models_set:
+                # Exact match exists - use it, skip versioned variants
+                result.add(preferred)
+                matched.update(m for m in models if m.startswith(preferred + "-"))
+                matched.add(preferred)
+            else:
+                # No exact match - pick the best variant (prefer "-latest", then shortest)
+                variants = sorted(
+                    [m for m in models if m.startswith(preferred) and m not in matched],
+                    key=lambda m: (0 if m.endswith("-latest") else 1, len(m)),
+                )
+                if variants:
+                    result.add(variants[0])
+                    matched.update(variants)
+
+        # Include any remaining models not matched by preferences
+        for m in models:
+            if m not in matched:
+                result.add(m)
+
+        return list(result)
 
     @retry_with_backoff(RetryConfig(
         max_retries=3,
@@ -98,7 +165,9 @@ class GeminiProvider(LLMProvider):
                 raw_response=response,
             )
 
-        except google_exceptions.ResourceExhausted:
+        except google_exceptions.ResourceExhausted as e:
+            if "limit: 0" in str(e):
+                raise PermanentQuotaError(self.model_id, e) from e
             self.status = ProviderStatus.DEGRADED
             raise
         except google_exceptions.DeadlineExceeded:

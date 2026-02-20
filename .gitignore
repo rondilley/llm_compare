@@ -80,6 +80,10 @@ scans/
 *.pcapng
 evaluations/
 
+# Local GGUF Models
+models/
+*.gguf
+
 # Temporary Files
 tmp/
 temp/

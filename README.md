@@ -53,35 +53,56 @@ Each file should contain only the API key on the first line.
 
 ## Local Model Setup (llama.cpp)
 
-To use local GGUF models alongside cloud APIs:
+### Automatic Setup (Recommended)
 
-1. Install llama-cpp-python:
+The `setup-local` command auto-detects your hardware, selects the best model and quantization, downloads it, and generates the configuration:
+
 ```bash
-pip install llama-cpp-python
-# For GPU acceleration (CUDA):
-# CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python
+# Install dependencies
+pip install llama-cpp-python huggingface_hub
+
+# Auto-detect hardware and download best model
+python -m llm_compare setup-local
+
+# Preview what would be selected without downloading
+python -m llm_compare setup-local --dry-run
+
+# Force CPU-only selection
+python -m llm_compare setup-local --cpu-only
+
+# Custom download directory
+python -m llm_compare setup-local --models-dir /path/to/models
 ```
 
-2. Place GGUF model files in `./models/` or configure custom paths
+The command will:
+1. Detect your GPU (NVIDIA VRAM) and available RAM
+2. Select the best Llama model + quantization that fits
+3. Download it from Hugging Face Hub (~1-9GB depending on model)
+4. Generate `llamacpp.config.json` with optimal settings
 
-3. Create `llamacpp.config.json` (see `llamacpp.config.json.example`):
+After setup, the local model automatically participates in evaluations alongside cloud APIs.
+
+### Manual Setup
+
+For manual configuration, place GGUF model files in `./models/` and create `llamacpp.config.json`:
+
 ```json
 {
   "model_dirs": ["./models"],
-  "default_n_ctx": 4096,
-  "default_n_gpu_layers": 0,
+  "default_n_ctx": 32768,
+  "default_n_gpu_layers": -1,
   "models": {
     "llama3-8b": {
-      "path": "./models/llama-3-8b-instruct.Q4_K_M.gguf",
-      "n_ctx": 8192,
-      "n_gpu_layers": 35,
+      "path": "./models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
+      "n_ctx": 32768,
+      "n_gpu_layers": -1,
       "chat_format": "llama-3"
     }
   }
 }
 ```
 
-Local models will be discovered automatically and participate in evaluations alongside cloud APIs.
+Set `n_gpu_layers` to `-1` for full GPU offload, or `0` for CPU-only.
 
 ## Usage
 
@@ -184,6 +205,7 @@ The tool includes several security measures:
 
 - Python 3.10+
 - API keys for at least 2 LLM providers (for meaningful comparison)
+- For local models: `llama-cpp-python`, `huggingface_hub` (installed via `pip install -r requirements.txt`)
 
 ## Documentation
 
