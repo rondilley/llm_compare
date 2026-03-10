@@ -25,6 +25,7 @@ flowchart TB
         PM --> CLD[Anthropic<br/>Claude]
         PM --> GEM[Google<br/>Gemini]
         PM --> XAI[xAI<br/>Grok]
+        PM --> MIS[Mistral<br/>AI]
     end
 
     subgraph Output
@@ -172,10 +173,19 @@ classDiagram
         +evaluate(response, rubric)
     }
 
+    class MistralProvider {
+        +name = "mistral"
+        +model_id = "mistral-large-latest"
+        -client: OpenAI
+        +generate(prompt, kwargs)
+        +evaluate(response, rubric)
+    }
+
     LLMProvider <|-- OpenAIProvider
     LLMProvider <|-- ClaudeProvider
     LLMProvider <|-- GeminiProvider
     LLMProvider <|-- XAIProvider
+    LLMProvider <|-- MistralProvider
 ```
 
 ---
@@ -328,6 +338,7 @@ flowchart LR
         RESP_B[Response B<br/>Claude]
         RESP_C[Response C<br/>Gemini]
         RESP_D[Response D<br/>xAI]
+        RESP_E[Response E<br/>Mistral]
     end
 
     subgraph Evaluators["Evaluator Assignment"]
@@ -486,6 +497,7 @@ sequenceDiagram
         PM->>API: Claude request
         PM->>API: Gemini request
         PM->>API: xAI request
+        PM->>API: Mistral request
     end
 
     alt Success
@@ -638,6 +650,7 @@ flowchart BT
         CLD[claude_provider.py]
         GEM[gemini_provider.py]
         XAI_P[xai_provider.py]
+        MIS_P[mistral_provider.py]
         DISC[discovery.py]
     end
 
@@ -670,7 +683,7 @@ flowchart BT
     MGR --> STOR
 
     DISC --> BASE
-    OAI & CLD & GEM & XAI_P --> BASE
+    OAI & CLD & GEM & XAI_P & MIS_P --> BASE
     BASE --> LOG & RETRY
     BASE --> REP
 
@@ -699,12 +712,14 @@ flowchart TB
         ANT_API[Anthropic API]
         GOO_API[Google AI API]
         XAI_API[xAI API]
+        MIS_API[Mistral API]
     end
 
     CLI_APP --> |HTTPS| OAI_API
     CLI_APP --> |HTTPS| ANT_API
     CLI_APP --> |HTTPS| GOO_API
     CLI_APP --> |HTTPS| XAI_API
+    CLI_APP --> |HTTPS| MIS_API
 
     KEYS --> CLI_APP
     CLI_APP --> OUT

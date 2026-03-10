@@ -10,8 +10,8 @@ LLM Compare sends the same prompt to all available AI providers, then orchestrat
 
 - **Automatic Provider Discovery:** Detects available LLM providers via `*.key.txt` files
 - **Dynamic Model Selection:** Automatically queries each provider's API to select the best available model
-- **Multi-Provider Support:** OpenAI, Anthropic Claude, Google Gemini, xAI Grok
-- **Local Model Support:** Run local GGUF models via llama.cpp alongside cloud APIs
+- **Multi-Provider Support:** OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Mistral AI
+- **Local Model Support:** Run local GGUF models via llama.cpp alongside cloud APIs (opt-in via `--local` flag)
 - **Prompt Repetition:** Improves non-reasoning LLM performance based on research paper (Leviathan et al., 2025)
 - **Hybrid Evaluation Pipeline:**
   - Pointwise scoring against defined rubrics
@@ -46,6 +46,7 @@ Place API keys in the project root with the naming convention `{provider}.key.tx
 | Anthropic | `claude.key.txt` |
 | Google | `gemini.key.txt` |
 | xAI | `xai.key.txt` |
+| Mistral | `mistral.key.txt` |
 
 Each file should contain only the API key on the first line.
 
@@ -80,7 +81,11 @@ The command will:
 3. Download it from Hugging Face Hub (~1-9GB depending on model)
 4. Generate `llamacpp.config.json` with optimal settings
 
-After setup, the local model automatically participates in evaluations alongside cloud APIs.
+After setup, include the local model in evaluations by passing the `--local` flag:
+
+```bash
+python -m llm_compare -p "Your prompt" --local
+```
 
 ### Manual Setup
 
@@ -118,6 +123,9 @@ python -m llm_compare --providers openai,claude --prompt "Your prompt"
 
 # Custom output directory
 python -m llm_compare --output ./my_evaluations --prompt "Your prompt"
+
+# Include local llama.cpp models (disabled by default)
+python -m llm_compare --local --prompt "Your prompt"
 ```
 
 ### Prompt Repetition

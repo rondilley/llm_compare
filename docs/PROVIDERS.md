@@ -24,6 +24,7 @@ flowchart TD
         F2[claude.key.txt] --> P2[ClaudeProvider]
         F3[gemini.key.txt] --> P3[GeminiProvider]
         F4[xai.key.txt] --> P4[XAIProvider]
+        F7[mistral.key.txt] --> P7[MistralProvider]
     end
 
     subgraph Local["Local Model Mapping"]
@@ -50,6 +51,7 @@ sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 | `claude.key.txt` | Anthropic | api.anthropic.com |
 | `gemini.key.txt` | Google | generativelanguage.googleapis.com |
 | `xai.key.txt` | xAI | api.x.ai |
+| `mistral.key.txt` | Mistral | api.mistral.ai |
 
 ### Local Model Configuration
 
@@ -298,6 +300,51 @@ class XAIProvider(LLMProvider):
 - OpenAI-compatible API format
 - Authentication: Bearer token
 
+### Mistral Provider
+
+```mermaid
+flowchart LR
+    subgraph Mistral["Mistral Provider"]
+        CLIENT[OpenAI-compatible Client]
+        MODEL[mistral-large-latest]
+    end
+
+    subgraph Features
+        F1[OpenAI compatible]
+        F2[Multiple model tiers]
+    end
+
+    subgraph Config
+        C1[timeout: 120s]
+        C2[max_tokens: 4096]
+        C3[temperature: 0.7]
+        C4[base_url: api.mistral.ai]
+    end
+
+    Config --> Mistral
+    Mistral --> Features
+```
+
+**Configuration:**
+```python
+class MistralProvider(LLMProvider):
+    name = "mistral"
+    model_id = "mistral-large-latest"
+
+    default_config = {
+        "timeout": 120,
+        "max_tokens": 4096,
+        "temperature": 0.7,
+        "base_url": "https://api.mistral.ai/v1",
+    }
+```
+
+**API Details:**
+- Uses OpenAI client with custom base URL
+- OpenAI-compatible API format
+- Authentication: Bearer token
+- Model preferences: `mistral-large-latest` > `mistral-medium-latest` > `mistral-small-latest` > `open-mistral-nemo` > `open-mixtral-8x22b`
+
 ### llama.cpp Provider (Local Models)
 
 ```mermaid
@@ -490,15 +537,16 @@ flowchart TD
         REQ2[Claude Request]
         REQ3[Gemini Request]
         REQ4[xAI Request]
+        REQ5[Mistral Request]
     end
 
-    subgraph Local["Local Model Inference"]
-        REQ5[llama.cpp Model 1]
-        REQ6[llama.cpp Model 2]
+    subgraph Local["Local Model Inference (--local flag)"]
+        REQ6[llama.cpp Model 1]
+        REQ7[llama.cpp Model 2]
     end
 
-    DISPATCH --> REQ1 & REQ2 & REQ3 & REQ4
-    DISPATCH --> REQ5 & REQ6
+    DISPATCH --> REQ1 & REQ2 & REQ3 & REQ4 & REQ5
+    DISPATCH -->|--local| REQ6 & REQ7
 
     REQ1 --> COLLECT[Response Collector]
     REQ2 --> COLLECT
@@ -506,6 +554,7 @@ flowchart TD
     REQ4 --> COLLECT
     REQ5 --> COLLECT
     REQ6 --> COLLECT
+    REQ7 --> COLLECT
 
     COLLECT --> TIMEOUT{All Complete or Timeout?}
     TIMEOUT -->|All Complete| SUCCESS[All Responses]
@@ -548,7 +597,8 @@ flowchart LR
         P2[Claude-3-opus: $15/$75]
         P3[Gemini-pro: $0.50/$1.50]
         P4[Grok: TBD]
-        P5[llama.cpp: $0 local]
+        P5[Mistral-large: $2/$6]
+        P6[llama.cpp: $0 local]
     end
 
     Pricing --> COST
