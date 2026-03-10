@@ -175,8 +175,13 @@ def print_repetition_analysis(analysis):
     is_flag=True,
     help='Run both baseline and repeated prompts for comparison'
 )
+@click.option(
+    '--local', '-l',
+    is_flag=True,
+    help='Include local llama.cpp models in the provider pool'
+)
 @click.pass_context
-def cli(ctx, prompt, providers, output, skip, verbose, repetition, compare_repetition):
+def cli(ctx, prompt, providers, output, skip, verbose, repetition, compare_repetition, local):
     """LLM Compare - Multi-AI comparison and evaluation tool."""
     ctx.ensure_object(dict)
 
@@ -200,6 +205,7 @@ def cli(ctx, prompt, providers, output, skip, verbose, repetition, compare_repet
     ctx.obj['repetition_mode'] = rep_mode
     ctx.obj['compare_repetition'] = compare_repetition
     ctx.obj['auto_detect_repetition'] = auto_detect
+    ctx.obj['include_local'] = local
 
     # If no subcommand, run evaluation
     if ctx.invoked_subcommand is None:
@@ -255,9 +261,10 @@ def evaluate(ctx, prompt):
         console.print()
 
     # Discover providers
+    include_local = ctx.obj.get('include_local', False)
     with get_progress() as progress:
         task = progress.add_task("Discovering providers...", total=None)
-        available = manager.discover_providers()
+        available = manager.discover_providers(include_local=include_local)
         progress.update(task, completed=True)
 
     if not available:
@@ -345,8 +352,9 @@ def interactive(ctx):
     manager = SessionManager(config=config)
 
     # Discover providers
+    include_local = ctx.obj.get('include_local', False)
     console.print("Discovering providers...")
-    available = manager.discover_providers()
+    available = manager.discover_providers(include_local=include_local)
 
     if not available:
         console.print("[red]Error: No providers found. Check API key files.[/red]")
@@ -428,7 +436,8 @@ def providers(ctx):
     config = Config(output_dir=ctx.obj.get('output', default_config.output_dir))
     manager = SessionManager(config=config)
 
-    available = manager.discover_providers()
+    include_local = ctx.obj.get('include_local', False)
+    available = manager.discover_providers(include_local=include_local)
 
     if not available:
         console.print("[yellow]No providers found. Check API key files:[/yellow]")

@@ -123,8 +123,8 @@ class SessionManager:
         self.providers: Dict[str, LLMProvider] = {}
         self._discovery = ProviderDiscovery(self.config)
 
-    def discover_providers(self) -> List[str]:
-        self.providers = self._discovery.discover()
+    def discover_providers(self, include_local: bool = False) -> List[str]:
+        self.providers = self._discovery.discover(include_local=include_local)
         return list(self.providers.keys())
 
     def create_session(self, prompt: str) -> Session:
@@ -137,6 +137,7 @@ class SessionManager:
         skip_phases: Optional[List[str]] = None,
         repetition_mode: Optional[RepetitionMode] = None,
         compare_repetition: bool = False,
+        include_local: bool = False,
     ) -> Session:
         """
         Run a complete evaluation session through all phases.
@@ -163,7 +164,7 @@ class SessionManager:
 
         try:
             if not self.providers:
-                self.discover_providers()
+                self.discover_providers(include_local=include_local)
             if len(self.providers) < 2:
                 raise ValueError(f"Need at least 2 providers, found {len(self.providers)}")
 

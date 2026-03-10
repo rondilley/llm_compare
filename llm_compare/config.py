@@ -243,6 +243,7 @@ class Config:
         "claude": "claude.key.txt",
         "gemini": "gemini.key.txt",
         "xai": "xai.key.txt",
+        "mistral": "mistral.key.txt",
     })
 
     # Model IDs for each provider (empty = auto-select best available)

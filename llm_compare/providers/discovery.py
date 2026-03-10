@@ -49,17 +49,22 @@ class ProviderDiscovery:
         from .claude_provider import ClaudeProvider
         from .gemini_provider import GeminiProvider
         from .xai_provider import XAIProvider
+        from .mistral_provider import MistralProvider
 
         self.register_provider("openai", OpenAIProvider)
         self.register_provider("claude", ClaudeProvider)
         self.register_provider("gemini", GeminiProvider)
         self.register_provider("xai", XAIProvider)
+        self.register_provider("mistral", MistralProvider)
 
         self._registration_done = True
 
-    def discover(self) -> Dict[str, LLMProvider]:
+    def discover(self, include_local: bool = False) -> Dict[str, LLMProvider]:
         """
         Discover and initialize all available providers.
+
+        Args:
+            include_local: If True, also discover local llama.cpp models (disabled by default due to speed)
 
         Returns:
             Dictionary of provider name to provider instance
@@ -70,8 +75,9 @@ class ProviderDiscovery:
         # Discover API-based providers
         self._discover_api_providers()
 
-        # Discover local llama.cpp models
-        self._discover_llamacpp_models()
+        # Discover local llama.cpp models (opt-in)
+        if include_local:
+            self._discover_llamacpp_models()
 
         if not self._providers:
             logger.warning("No providers discovered. Check API key files or model directories.")

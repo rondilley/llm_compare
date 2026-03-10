@@ -413,7 +413,7 @@ REASONING: [Brief explanation of verdict]"""
                 if current_section:
                     result[current_section] = " ".join(section_content).strip()
                 current_section = None
-                conf_text = line.split(":", 1)[1].strip() if ":" in line else ""
+                conf_text = line.split(":", 1)[1].strip().strip("*") if ":" in line else ""
                 try:
                     result["confidence"] = float(conf_text)
                     result["confidence"] = max(0.0, min(1.0, result["confidence"]))

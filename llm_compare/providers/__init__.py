@@ -6,6 +6,7 @@ from .openai_provider import OpenAIProvider
 from .claude_provider import ClaudeProvider
 from .gemini_provider import GeminiProvider
 from .xai_provider import XAIProvider
+from .mistral_provider import MistralProvider
 
 # Conditional import for llama.cpp (requires llama-cpp-python)
 try:
@@ -24,5 +25,6 @@ __all__ = [
     "ClaudeProvider",
     "GeminiProvider",
     "XAIProvider",
+    "MistralProvider",
     "LlamaCppProvider",
 ]
